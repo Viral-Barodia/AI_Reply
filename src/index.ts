@@ -1,16 +1,26 @@
-import express from 'express';
-const app = express();
+import { authorize } from './gmail/authorize';
+import { getFirstMessage, sendEmail } from './gmail/gmailInteraction';
+import { getAIResponse } from './geminiAI/ai.request';
+import { ErrorMessages } from './constants/App.constants';
 
-const PORT: number = 3000;
+/**
+* Function to authorize our app to read email and create drafts, and send and receive reply from Google Gemini 1.5 AI Model
+* @params none
+* @returns none (Sends AI generated response to draft)
+*/
+async function logEmailBody() {
+    try {
+        const auth = await authorize();
+        const emailBody = await getFirstMessage(auth);
+        const ai_response = await getAIResponse(emailBody);
+        if(ai_response !== null)
+            sendEmail(auth, ai_response);
+        else
+            console.error(ErrorMessages.AI_MODEL_ERROR);
+    } catch(err) {
+        console.log(err);
+    }
+}
 
-app.get('/', (req,res) => {
-    res.send('Hello from server');
-})
-
-app.get('/contact', (req,res) => {
-    res.send('contact us now!');
-})
-
-app.listen(PORT, () => {
-    console.log(`Server is running on port:${PORT}`);
-})
+// Function call
+logEmailBody();
