@@ -1,48 +1,85 @@
-const {google} = require('googleapis');
-
-let threadId='', messageId='', emailFrom='', emailSubject='';
+import { google } from 'googleapis';
+import { addToInboxQueue } from '../bullmq/gmailToGemini';
+import { emailJob } from '../interfaces/email.interface';
 
 /**
- * Lists the labels in the user's account.
- *
- * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
+ * Prepares an email-bundle and adds it to queue
+ * @param messageList => list of all messages
+ * @param gmail => gmail object constructed using google.gmail
  */
-export async function listLabels(auth: any) {
-    const gmail = google.gmail({version: 'v1', auth});
-    const res = await gmail.users.labels.list({
-      userId: 'me',
-    });
-    const labels = res.data.labels;
-    if (!labels || labels.length === 0) {
-      console.log('No labels found.');
-      return;
+const prepareEmailAndAddToQueue = async (messageList: any, gmail: any, auth: any) => {
+  const processedMessages = new Set<string>();
+
+  if (messageList.data.messages && messageList.data.messages.length > 0) {
+    for (const message of messageList.data.messages) {
+      const messageId = message.id;
+      const threadId = message.threadId;
+      if (processedMessages.has(messageId)) {
+        continue;
+      }
+
+      try {
+        const res = await gmail.users.messages.get({
+          userId: 'me',
+          id: messageId,
+        });
+        const emailFrom = res?.data?.payload?.headers?.find((header: { name: string }) => header.name === 'From')?.value || null;
+        const emailSubject = res?.data?.payload?.headers?.find((header: { name: string }) => header.name === 'Subject')?.value || null;
+        const emailPrompt = await getEmailText(res.data.payload) || '';
+        if (messageId && threadId && emailFrom && emailSubject && emailPrompt) {
+          await addToInboxQueue({ messageId, threadId, emailFrom, emailSubject, emailPrompt, auth });
+          processedMessages.add(messageId);
+        }
+      } catch (error) {
+        console.error(`Error processing email with ID ${messageId}:`, error);
+      }
     }
-    console.log('Labels:');
-    labels.forEach((label: { name: any; }) => {
-      console.log(`- ${label.name}`);
-    });
+  }
 }
 
-// https://developers.google.com/gmail/api/reference/rest/v1/users.messages/get
+/**
+ * Gets email Text from the body
+ * @param payload
+ */
+async function getEmailText(payload: any): Promise<string | null> {
+  let emailbody = '';
+
+  if (payload && payload.parts && payload.parts.length > 0) {
+    const firstPart = payload.parts[0];
+    if (firstPart.body && firstPart.body.data) {
+      emailbody = Buffer.from(
+        firstPart.body.data.replace(/-/g, '+').replace(/_/g, '/'),
+        'base64'
+      ).toString('utf-8');
+    } else {
+      console.log('No text/plain data found in the first part.');
+    }
+  } else {
+    console.log('No parts found in email payload.');
+  }
+
+  return emailbody || null;
+}
+
 /**
 * Function to get the first email from all the emails
 * @param: {auth} To identify the user succesfully
 * @returns: The body of the first email
 */
-export async function getFirstMessage(auth: any) {
-  const gmail = google.gmail({ version: 'v1', auth });
-  const messageList = await gmail.users.messages.list({
-    userId: 'me'
-  });
-  messageId = ((messageList.data.messages[0].id));
-  threadId = ((messageList.data.messages[0].threadId));
-  const res = await gmail.users.messages.get({
-    userId: 'me',
-    id: messageId
-  });
-  emailFrom = res.data.payload.headers.find((header: { name: string; value: string }) => header.name==='From').value;
-  emailSubject = res.data.payload.headers.find((header: { name: string; value: string }) => header.name==='Subject').value;
-  return res.data.snippet;
+export async function getMessages(auth: any) {
+  try {
+    const gmail = google.gmail({ version: 'v1', auth });
+    const messageList = await gmail.users.messages.list({
+      userId: 'me',
+      q: 'is:unread',
+      maxResults: 10
+    });
+    await prepareEmailAndAddToQueue(messageList, gmail, auth);
+  } catch(err) {
+    console.error(`The error while getting messages is`, err);
+  } finally {
+    setTimeout(() => getMessages(auth), 30000);
+  }
 }
 
 /**
@@ -50,27 +87,29 @@ export async function getFirstMessage(auth: any) {
 * @param: {auth} To identify the user succesfully
 * @returns: The body of the first email
 */
-export async function sendEmail(auth: any, emailBody: string) {
+export async function sendEmail(emailObject: emailJob) {
+  const { emailFrom, emailSubject, threadId, messageId, emailPrompt, auth } = emailObject;
   const gmail = google.gmail({ version: 'v1', auth });
   const messageToSend = [
     `To: ${emailFrom}`,
     `Subject: Re: ${emailSubject}`,
     ``,
-    emailBody
+    emailPrompt
   ].join('\n');
-  const buffString = Buffer.from(messageToSend, 'utf-8');
-  const base64Message = buffString.toString('base64');
-
-  const createdDraft = await gmail.users.drafts.create({
-    userId: 'me',
-    requestBody: {
-      message: {
-        id: messageId,
-        threadId: threadId,
-        labelIds: ['DRAFT'],
-        raw: base64Message
+  const base64Message = Buffer.from(messageToSend).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  try {
+    await gmail.users.drafts.create({
+      userId: 'me',
+      requestBody: {
+        message: {
+          id: messageId,
+          threadId: threadId,
+          labelIds: ['DRAFT'],
+          raw: base64Message
+        }
       }
-    }
-  });
-  console.log(createdDraft);
+    });
+  } catch (err) {
+    console.log(`Error while sending message`, err);
+  }
 }
