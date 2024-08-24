@@ -40,6 +40,7 @@ const prepareEmailAndAddToQueue = async (messageList: any, gmail: any, auth: any
 /**
  * Gets email Text from the body
  * @param payload
+ * @returns a Promise containing the content of the email received
  */
 async function getEmailText(payload: any): Promise<string | null> {
   let emailbody = '';
@@ -63,8 +64,8 @@ async function getEmailText(payload: any): Promise<string | null> {
 
 /**
 * Function to get the first email from all the emails
-* @param: {auth} To identify the user succesfully
-* @returns: The body of the first email
+* @param auth To identify the user succesfully
+* @returns Null. Pushes the email content to a queue.
 */
 export async function getMessages(auth: any) {
   try {
@@ -85,7 +86,7 @@ export async function getMessages(auth: any) {
 /**
 * Function to send the response from AI model as a reply to the received email
 * @param: {auth} To identify the user succesfully
-* @returns: The body of the first email
+* @returns: Null. Sends the response as a draft
 */
 export async function sendEmail(emailObject: emailJob) {
   const { emailFrom, emailSubject, threadId, messageId, emailPrompt, auth } = emailObject;

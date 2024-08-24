@@ -13,7 +13,7 @@ export const addToDraftQueue = async (email: emailJob) => {
     await draftQueue.add('email', email, { removeOnComplete: true, removeOnFail: true });
 }
 
-
+// Worker to reconstruct the auth object and create the draft from the reply received from Gemini
 const gmailWorker = new Worker<emailJob>('draftQueue', async (job: Job<emailJob>) => {
     const authData = job.data.auth;
     const auth = new google.auth.OAuth2();

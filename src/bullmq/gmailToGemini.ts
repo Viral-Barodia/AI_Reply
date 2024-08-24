@@ -15,6 +15,7 @@ export const addToInboxQueue = async (email: emailJob) => {
     await inboxQueue.add('email', {...email, auth: credentials}, { removeOnComplete: true, removeOnFail: true });
 }
 
+// Worker to send email content to Gemini for generating a draft
 const geminiWorker = new Worker<emailJob>('inboxQueue', async (job: Job<emailJob>) => {
     const emailText = job.data.emailPrompt;
     const reply: string = await getAIResponse(emailText);
